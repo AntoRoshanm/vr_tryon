@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VR Try-On</title>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; display: flex; }
+
+        /* Left side: Camera */
+        #videoContainer {
+            width: 50%;
+            position: relative;
+        }
+
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        #overlayCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Right side: Cards */
+        #cardSection {
+            width: 50%;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);  /* 2 columns */
+            grid-template-rows: repeat(5, 1fr);    /* 5 rows */
+            gap: 10px;
+        }
+
+        .card {
+            width: 100%;
+            height: 100px;
+            background-color: #f8f8f8;
+            border-radius: 10px;
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2rem;
+            color: #444;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .card img {
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 8px;
+        }
+
+        .card:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Left side: Live Video with Skeleton Detection -->
+    <div id="videoContainer">
+        <img id="videoElement" src="{{ url_for('video_feed') }}" alt="Live video feed"/>
+        <canvas id="overlayCanvas"></canvas>
+    </div>
+
+    <!-- Right side: Dress Selection Grid -->
+    <div id="cardSection">
+        {% for i in range(1, 11) %}  <!-- 5 rows, 2 columns = 10 dresses -->
+        <div class="card" onclick="applyDress('{{i}}.png')">
+            <img src="{{ url_for('tryon_image', filename=i|string+'.png') }}" alt="Dress {{i}}">
+        </div>
+        {% endfor %}
+    </div>
+
+    <script>
+        var overlayImage = new Image();
+        var poseLandmarks = null;  // Store the landmarks
+
+        // Function to apply the selected dress when a card is clicked
+        function applyDress(imageName) {
+            // Ensure overlayImage is properly updated with the chosen dress
+            overlayImage.src = '/tryon/' + imageName;
+
+            // Ensure the image is loaded before trying to draw it
+            overlayImage.onload = function() {
+                console.log("Dress image loaded: " + imageName);
+            };
+        }
+
+        // Get the landmarks from the Pose detection
+        function updatePoseLandmarks(landmarks) {
+            poseLandmarks = landmarks;
+        }
+
+        // Live video canvas and overlay logic
+        var canvas = document.getElementById('overlayCanvas');
+        var ctx = canvas.getContext('2d');
+        var videoElement = document.getElementById('videoElement');
+
+        // Resize the canvas to match the video
+        function resizeCanvas() {
+            canvas.width = videoElement.offsetWidth;
+            canvas.height = videoElement.offsetHeight;
+        }
+
+        // Function to calculate the body bounding box based on landmarks
+        function getBoundingBox(landmarks) {
+            if (!landmarks) return null;
+
+            const shoulderLeft = landmarks[11];  // Left shoulder
+            const shoulderRight = landmarks[12]; // Right shoulder
+            const hipLeft = landmarks[23];       // Left hip
+            const hipRight = landmarks[24];      // Right hip
+
+            const minX = Math.min(shoulderLeft.x, shoulderRight.x, hipLeft.x, hipRight.x);
+            const maxX = Math.max(shoulderLeft.x, shoulderRight.x, hipLeft.x, hipRight.x);
+            const minY = Math.min(shoulderLeft.y, shoulderRight.y);
+            const maxY = Math.max(hipLeft.y, hipRight.y);
+
+            // Log landmark coordinates for debugging
+            console.log("Landmark coordinates:", { shoulderLeft, shoulderRight, hipLeft, hipRight });
+
+            return {
+                x: minX * canvas.width,
+                y: minY * canvas.height,
+                width: (maxX - minX) * canvas.width,
+                height: (maxY - minY) * canvas.height
+            };
+        }
+
+        // Draw the overlay dress
+        function drawOverlay() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (poseLandmarks && overlayImage.src) {
+                console.log("Pose landmarks detected:", poseLandmarks);
+
+                const bbox = getBoundingBox(poseLandmarks);
+                if (bbox) {
+                    // Log bounding box dimensions for debugging
+                    console.log("Bounding box:", bbox);
+
+                    // Adjust overlay position and size according to the body bounding box
+                    const padding = 0.1;  // Adjust padding as needed to make it look more natural
+                    const dressWidth = bbox.width * (1 + padding);
+                    const dressHeight = dressWidth * (overlayImage.height / overlayImage.width);  // Maintain dress aspect ratio
+
+                    // Log dress dimensions for debugging
+                    console.log("Drawing dress at:", bbox.x, bbox.y, dressWidth, dressHeight);
+
+                    // Draw the dress image at the calculated bounding box
+                    ctx.drawImage(overlayImage, bbox.x, bbox.y, dressWidth, dressHeight);
+                } else {
+                    console.log("No bounding box available.");
+                }
+            } else {
+                console.log("No pose landmarks or overlay image found.");
+            }
+        }
+
+        // Continuously update the canvas with the overlay
+        function updateOverlay() {
+            resizeCanvas();
+            drawOverlay();
+        }
+
+        // Redraw the overlay at regular intervals
+        setInterval(updateOverlay, 100);  // Redraw every 100ms to keep it in sync with the video
+
+        // Redraw the overlay whenever the window is resized
+        window.onresize = resizeCanvas;
+    </script>
+
+</body>
+</html>
